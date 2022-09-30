@@ -5,325 +5,385 @@ InstructionSet RV32I extends RISCVBase {
         XLEN = 32;
     }
 
-    instructions {
+    // The expected_encoding_width attribute will cause the frontend to report a warning
+    // (maybe even an error?) if the encoding of an instruction has a different width.
+    // This should help with troubleshooting, since it is very easy to accidentally mess
+    // up the width of an operand, especially since you have to keep in mind that each bit
+    // range's length is end - start + 1.
+    instructions [[expected_encoding_width=32]] {
         LUI {
+            operands: signed<32> imm, unsigned<5> rd;
             encoding: imm[31:12] :: rd[4:0] :: 7'b0110111;
             assembly: "{name(rd)}, {imm:#05x}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = (unsigned<XLEN>) ((signed) imm);
+            // No cast is needed for register assignments, because all types implicitly
+            // convert to bit vectors.
+            behavior: if (rd % RFS) X[rd % RFS] = sign_extend(XLEN, imm);
         }
 
         AUIPC {
+            operands: signed<32> imm, unsigned<5> rd;
             encoding: imm[31:12] :: rd[4:0] :: 7'b0010111;
             assembly: "{name(rd)}, {imm:#08x}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = PC+(signed)imm;
+            behavior: if (rd % RFS) X[rd % RFS] = truncate(PC + imm);
         }
 
         JAL [[no_cont]] {
-            encoding: imm[20:20] :: imm[10:1] :: imm[11:11] :: imm[19:12] :: rd[4:0] :: 7'b1101111;
+            operands: signed<32> imm, unsigned<5> rd;
+            // imm[20] and imm[11] no longer need to specify an end index.
+            encoding: imm[20] :: imm[10:1] :: imm[11] :: imm[19:12] :: rd[4:0] :: 7'b1101111;
             assembly: "{name(rd)}, {imm:#0x}";
             behavior: {
                 if (imm % INSTR_ALIGNMENT) {
                     raise(0, 0);
                 } else {
-                    if ((rd % RFS) != 0) X[rd % RFS] = PC + 4;
-                    PC = PC + (signed)imm;
+                    if (rd % RFS) X[rd % RFS] = truncate(PC + 4);
+                    PC += imm;
                 }
             }
         }
 
         JALR [[no_cont]] {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1;
             encoding: imm[11:0] :: rs1[4:0] :: 3'b000 :: rd[4:0] :: 7'b1100111;
             assembly: "{name(rd)}, {name(rs1)}, {imm:#0x}";
             behavior: {
-                unsigned<XLEN> new_pc = (X[rs1 % RFS] + (signed)imm) & ~0x1;
+                unsigned<XLEN> new_pc = truncate_u((unsigned)X[rs1 % RFS] + imm) & ~0x1;
                 if (new_pc % INSTR_ALIGNMENT) {
                     raise(0, 0);
                 } else {
-                    if ((rd % RFS) != 0) X[rd % RFS] = PC + 4;
+                    if (rd % RFS) X[rd % RFS] = truncate(PC + 4);
                     PC = new_pc & ~0x1;
                 }
             }
         }
 
         BEQ [[no_cont]] [[cond]] {
-            encoding: imm[12:12] ::imm[10:5] :: rs2[4:0] :: rs1[4:0] :: 3'b000 :: imm[4:1] :: imm[11:11] :: 7'b1100011;
+            operands: signed<13> imm, unsigned<5> rd, unsigned<5> rs1, unsigned<5> rs2;
+            encoding: imm[12] ::imm[10:5] :: rs2[4:0] :: rs1[4:0] :: 3'b000 :: imm[4:1] :: imm[11] :: 7'b1100011;
             assembly:"{name(rs1)}, {name(rs2)}, {imm:#0x}";
             behavior: {
+                // No casts necessary here, because bit vectors support equality comparisons.
                 if (X[rs1 % RFS] == X[rs2 % RFS]) {
                     if(imm % INSTR_ALIGNMENT) {
                         raise(0, 0);
                     } else {
-                        PC = PC + (signed)imm;
+                        PC += imm;
                     }
                 }
             }
         }
 
         BNE [[no_cont]] [[cond]] {
-            encoding: imm[12:12] ::imm[10:5] :: rs2[4:0] :: rs1[4:0] :: 3'b001 :: imm[4:1] :: imm[11:11] :: 7'b1100011;
+            operands: signed<13> imm, unsigned<5> rd, unsigned<5> rs1, unsigned<5> rs2;
+            encoding: imm[12] ::imm[10:5] :: rs2[4:0] :: rs1[4:0] :: 3'b001 :: imm[4:1] :: imm[11] :: 7'b1100011;
             assembly:"{name(rs1)}, {name(rs2)}, {imm:#0x}";
             behavior: {
                 if (X[rs1 % RFS] != X[rs2 % RFS]) {
                     if (imm % INSTR_ALIGNMENT) {
                         raise(0, 0);
                     } else {
-                        PC = PC + (signed)imm;
+                        PC += imm;
                     }
                 }
             }
         }
 
         BLT [[no_cont]] [[cond]] {
-            encoding: imm[12:12] ::imm[10:5] :: rs2[4:0] :: rs1[4:0] :: 3'b100 :: imm[4:1] :: imm[11:11] :: 7'b1100011;
+            operands: signed<13> imm, unsigned<5> rd, unsigned<5> rs1, unsigned<5> rs2;
+            encoding: imm[12] ::imm[10:5] :: rs2[4:0] :: rs1[4:0] :: 3'b100 :: imm[4:1] :: imm[11] :: 7'b1100011;
             assembly:"{name(rs1)}, {name(rs2)}, {imm:#0x}";
             behavior: {
-                if ((signed<XLEN>)X[rs1 % RFS] < (signed<XLEN>)X[rs2 % RFS]) {
+                if ((signed)X[rs1 % RFS] < (signed)X[rs2 % RFS]) {
                     if (imm % INSTR_ALIGNMENT) {
                         raise(0, 0);
                     } else {
-                        PC = PC + (signed)imm;
+                        PC += imm;
                     }
                 }
             }
         }
 
         BGE [[no_cont]] [[cond]] {
-            encoding: imm[12:12] ::imm[10:5] :: rs2[4:0] :: rs1[4:0] :: 3'b101 :: imm[4:1] :: imm[11:11] :: 7'b1100011;
+            operands: signed<13> imm, unsigned<5> rd, unsigned<5> rs1, unsigned<5> rs2;
+            encoding: imm[12] ::imm[10:5] :: rs2[4:0] :: rs1[4:0] :: 3'b101 :: imm[4:1] :: imm[11] :: 7'b1100011;
             assembly:"{name(rs1)}, {name(rs2)}, {imm:#0x}";
             behavior: {
-                if ((signed<XLEN>)X[rs1 % RFS] >= (signed<XLEN>)X[rs2 % RFS]) {
+                if ((signed)X[rs1 % RFS] >= (signed)X[rs2 % RFS]) {
                     if (imm % INSTR_ALIGNMENT) {
                         raise(0, 0);
                     } else {
-                        PC = PC + (signed)imm;
+                        PC += imm;
                     }
                 }
             }
         }
 
         BLTU [[no_cont]] [[cond]] {
-            encoding: imm[12:12] ::imm[10:5] :: rs2[4:0] :: rs1[4:0] :: 3'b110 :: imm[4:1] :: imm[11:11] :: 7'b1100011;
+            operands: signed<13> imm, unsigned<5> rd, unsigned<5> rs1, unsigned<5> rs2;
+            encoding: imm[12] ::imm[10:5] :: rs2[4:0] :: rs1[4:0] :: 3'b110 :: imm[4:1] :: imm[11] :: 7'b1100011;
             assembly:"{name(rs1)}, {name(rs2)}, {imm:#0x}";
             behavior: {
-                if (X[rs1 % RFS] < X[rs2 % RFS]) {
+                // The (unsigned) casts are actually mandatory here, because X is an array of bits<XLEN>, which does not define comparisons.
+                // I believe this is a good thing, because the signed comparison instructions also have to make this explicit.
+                if ((unsigned)X[rs1 % RFS] < (unsigned)X[rs2 % RFS]) {
                     if (imm % INSTR_ALIGNMENT) {
                         raise(0, 0);
                     } else {
-                        PC = PC + (signed)imm;
+                        PC += imm;
                     }
                 }
             }
         }
 
         BGEU [[no_cont]] [[cond]] {
-            encoding: imm[12:12] ::imm[10:5] :: rs2[4:0] :: rs1[4:0] :: 3'b111 :: imm[4:1] :: imm[11:11] :: 7'b1100011;
+            operands: signed<13> imm, unsigned<5> rd, unsigned<5> rs1, unsigned<5> rs2;
+            encoding: imm[12] ::imm[10:5] :: rs2[4:0] :: rs1[4:0] :: 3'b111 :: imm[4:1] :: imm[11] :: 7'b1100011;
             assembly:"{name(rs1)}, {name(rs2)}, {imm:#0x}";
             behavior: {
-                if (X[rs1 % RFS] >= X[rs2 % RFS]) {
+                if ((unsigned)X[rs1 % RFS] >= (unsigned)X[rs2 % RFS]) {
                     if (imm % INSTR_ALIGNMENT) {
                         raise(0, 0);
                     } else {
-                        PC = PC + (signed)imm;
+                        PC += imm;
                     }
                 }
             }
         }
 
         LB {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1;
             encoding: imm[11:0] :: rs1[4:0] :: 3'b000 :: rd[4:0] :: 7'b0000011;
             assembly:"{name(rd)}, {imm}({name(rs1)})";
             behavior: {
-                unsigned<XLEN> load_address = X[rs1 % RFS] + (signed)imm;
-                signed<8> res = (signed<8>)MEM[load_address];
-                if((rd % RFS) != 0) X[rd % RFS] = (unsigned<XLEN>)res;
+                unsigned<XLEN> load_address = truncate_u((unsigned)X[rs1 % RFS] + imm);
+                if(rd % RFS) X[rd % RFS] = sign_extend(XLEN, load_le(signed<8>, MEM, load_address));
             }
         }
 
         LH {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1;
             encoding: imm[11:0] :: rs1[4:0] :: 3'b001 :: rd[4:0] :: 7'b0000011;
             assembly:"{name(rd)}, {imm}({name(rs1)})";
             behavior: {
-                unsigned<XLEN> load_address = X[rs1 % RFS] + (signed)imm;
-                signed<16> res = (signed<16>)MEM[load_address];
-                if ((rd % RFS) != 0) X[rd % RFS] = (unsigned<XLEN>)res;
+                unsigned<XLEN> load_address = truncate_u((unsigned)X[rs1 % RFS] + imm);
+                if (rd % RFS) X[rd % RFS] = sign_extend(XLEN, load_le(signed<16>, MEM, load_address));
              }
         }
 
         LW {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1;
             encoding: imm[11:0] :: rs1[4:0] :: 3'b010 :: rd[4:0] :: 7'b0000011;
             assembly:"{name(rd)}, {imm}({name(rs1)})";
             behavior: {
-                unsigned<XLEN> load_address = X[rs1 % RFS] + (signed)imm;
-                signed<32> res = (signed<32>)MEM[load_address];
-                if ((rd % RFS) != 0) X[rd % RFS] = (unsigned<XLEN>)res;
+                unsigned<XLEN> load_address = truncate_u((unsigned)X[rs1 % RFS] + imm);
+                if (rd % RFS) X[rd % RFS] = sign_extend(XLEN, load_le(signed<32>, MEM, load_address));
             }
         }
 
         LBU {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1;
             encoding: imm[11:0] :: rs1[4:0] :: 3'b100 :: rd[4:0] :: 7'b0000011;
             assembly:"{name(rd)}, {imm}({name(rs1)})";
             behavior: {
-                unsigned<XLEN> load_address = X[rs1 % RFS] + (signed)imm;
-                unsigned<8> res = (unsigned<8>)MEM[load_address];
-                if ((rd % RFS) != 0) X[rd % RFS] = (unsigned<XLEN>)res;
+                unsigned<XLEN> load_address = truncate_u((unsigned)X[rs1 % RFS] + imm);
+                // We can use bits<8> here because zero_extend works on bit vectors.
+                // This makes it clear that we don't actually need to know what the 8 bits
+                // represent in order to load them from memory.
+                // In the LB instruction on the other hand we had to use signed<8>, because
+                // sign_extend is an operation that only has a meaning for signed values.
+                // I don't see this as a limitation of this proposed CoreDSL flavor, but rather
+                // believe it demonstrates how LB is an instruction only meant for integer values
+                // while LBU can be used for all sorts of data. The fact that this nuance is
+                // expressible in code is a huge improvement in my opinion. 
+                if(rd % RFS) X[rd % RFS] = zero_extend(XLEN, load_le(bits<8>, MEM, load_address));
             }
         }
 
         LHU {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1;
             encoding: imm[11:0] :: rs1[4:0] :: 3'b101 :: rd[4:0] :: 7'b0000011;
             assembly:"{name(rd)}, {imm}({name(rs1)})";
             behavior: {
-                unsigned<XLEN> load_address = X[rs1 % RFS] + (signed)imm;
-                unsigned<16> res = (unsigned<16>)MEM[load_address];
-                if((rd % RFS) != 0) X[rd % RFS] = (unsigned<XLEN>)res;
+                unsigned<XLEN> load_address = truncate_u((unsigned)X[rs1 % RFS] + imm);
+                if(rd % RFS) X[rd % RFS] = zero_extend(XLEN, load_le(bits<16>, MEM, load_address));
             }
         }
 
         SB {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1, unsigned<5> rs2;
             encoding: imm[11:5] :: rs2[4:0] :: rs1[4:0] :: 3'b000 :: imm[4:0] :: 7'b0100011;
             assembly:"{name(rs2)}, {imm}({name(rs1)})";
             behavior: {
-                unsigned<XLEN> store_address = X[rs1 % RFS] + (signed)imm;
-                MEM[store_address] = (signed<8>)X[rs2 % RFS];
+                unsigned<XLEN> store_address = truncate_u((unsigned)X[rs1 % RFS] + imm);
+                // I use truncate here instead of truncate_u, because we don't care about
+                // the interpretation of the bit vector in the register. 
+                store_le(bits<8>, MEM, store_address, truncate(8, X[rs2 % RFS]));
             }
         }
 
         SH {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1, unsigned<5> rs2;
             encoding: imm[11:5] :: rs2[4:0] :: rs1[4:0] :: 3'b001 :: imm[4:0] :: 7'b0100011;
             assembly:"{name(rs2)}, {imm}({name(rs1)})";
             behavior: {
-                unsigned<XLEN> store_address = X[rs1 % RFS] + (signed)imm;
-                MEM[store_address] = (signed<16>)X[rs2 % RFS];
+                unsigned<XLEN> store_address = truncate_u((unsigned)X[rs1 % RFS] + imm);
+                store_le(bits<16>, MEM, store_address, truncate(16, X[rs2 % RFS]));
             }
         }
 
         SW {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1, unsigned<5> rs2;
             encoding: imm[11:5] :: rs2[4:0] :: rs1[4:0] :: 3'b010 :: imm[4:0] :: 7'b0100011;
             assembly:"{name(rs2)}, {imm}({name(rs1)})";
             behavior: {
-                unsigned<XLEN> store_address = X[rs1 % RFS] + (signed)imm;
-                MEM[store_address] = (signed<32>)X[rs2 % RFS];
+                unsigned<XLEN> store_address = truncate_u((unsigned)X[rs1 % RFS] + imm);
+                store_le(bits<32>, MEM, store_address, truncate(32, X[rs2 % RFS]));
             }
         }
 
         ADDI {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1;
             encoding: imm[11:0] :: rs1[4:0] :: 3'b000 :: rd[4:0] :: 7'b0010011;
             assembly:"{name(rd)}, {name(rs1)}, {imm}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = X[rs1 % RFS] + (signed)imm;
+            behavior: if (rd % RFS) X[rd % RFS] = truncate((unsigned)X[rs1 % RFS] + imm);
         }
 
         SLTI {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1;
             encoding: imm[11:0] :: rs1[4:0] :: 3'b010 :: rd[4:0] :: 7'b0010011;
             assembly:"{name(rd)}, {name(rs1)}, {imm}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = ((signed)X[rs1 % RFS] < (signed)imm) ? 1 : 0;
+            behavior: if (rd % RFS) X[rd % RFS] = ((signed)X[rs1 % RFS] < imm) ? 1 : 0;
         }
 
         SLTIU {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1;
             encoding: imm[11:0] :: rs1[4:0] :: 3'b011 :: rd[4:0] :: 7'b0010011;
             assembly:"{name(rd)}, {name(rs1)}, {imm}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = (X[rs1 % RFS] < (unsigned<XLEN>)((signed)imm)) ? 1 : 0;
+            behavior: if (rd % RFS) X[rd % RFS] = ((unsigned)X[rs1 % RFS] < (unsigned)imm) ? 1 : 0;
         }
 
         XORI {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1;
             encoding: imm[11:0] :: rs1[4:0] :: 3'b100 :: rd[4:0] :: 7'b0010011;
             assembly:"{name(rd)}, {name(rs1)}, {imm}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = X[rs1 % RFS] ^ (unsigned<XLEN>)((signed)imm);
+            // No casts necessary here, because bits<XLEN> ^ signed<XLEN> is defined.
+            behavior: if (rd % RFS) X[rd % RFS] = X[rs1 % RFS] ^ zero_extend(XLEN, imm);
         }
 
         ORI {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1;
             encoding: imm[11:0] :: rs1[4:0] :: 3'b110 :: rd[4:0] :: 7'b0010011;
             assembly:"{name(rd)}, {name(rs1)}, {imm}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = X[rs1 % RFS] | (unsigned<XLEN>)((signed)imm);
+            behavior: if (rd % RFS) X[rd % RFS] = X[rs1 % RFS] | zero_extend(XLEN, imm);
         }
 
         ANDI {
+            operands: signed<12> imm, unsigned<5> rd, unsigned<5> rs1;
             encoding: imm[11:0] :: rs1[4:0] :: 3'b111 :: rd[4:0] :: 7'b0010011;
             assembly:"{name(rd)}, {name(rs1)}, {imm}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = X[rs1 % RFS] & (unsigned<XLEN>)((signed)imm);
+            behavior: if (rd % RFS) X[rd % RFS] = X[rs1 % RFS] & zero_extend(XLEN, imm);
         }
 
         SLLI {
+            operands: unsigned<5> shamt, unsigned<5> rd, unsigned<5> rs1;
             encoding: 7'b0000000 :: shamt[4:0] :: rs1[4:0] :: 3'b001 :: rd[4:0] :: 7'b0010011;
             assembly:"{name(rd)}, {name(rs1)}, {shamt}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = X[rs1 % RFS] << shamt;
+            behavior: if (rd % RFS) X[rd % RFS] = X[rs1 % RFS] << shamt;
         }
 
         SRLI {
+            operands: unsigned<5> shamt, unsigned<5> rd, unsigned<5> rs1;
             encoding: 7'b0000000 :: shamt[4:0] :: rs1[4:0] :: 3'b101 :: rd[4:0] :: 7'b0010011;
             assembly:"{name(rd)}, {name(rs1)}, {shamt}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = X[rs1 % RFS] >> shamt;
+            behavior: if (rd % RFS) X[rd % RFS] = X[rs1 % RFS] >> shamt;
         }
 
         SRAI {
+            operands: unsigned<5> shamt, unsigned<5> rd, unsigned<5> rs1;
             encoding: 7'b0100000 :: shamt[4:0] :: rs1[4:0] :: 3'b101 :: rd[4:0] :: 7'b0010011;
             assembly:"{name(rd)}, {name(rs1)}, {shamt}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = (signed<XLEN>)X[rs1 % RFS] >> shamt;
+            behavior: if (rd % RFS) X[rd % RFS] = (signed)X[rs1 % RFS] >> shamt;
         }
 
         ADD {
+            operands: unsigned<5> rd, unsigned<5> rs1, signed<5> rs2;
             encoding: 7'b0000000 :: rs2[4:0] :: rs1[4:0] :: 3'b000 :: rd[4:0] :: 7'b0110011;
             assembly:"{name(rd)}, {name(rs1)}, {name(rs2)}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = X[rs1 % RFS] + X[rs2 % RFS];
+            // Whether these casts are (signed) or (unsigned) does not matter because
+            // signed and unsigned addition behave identically in two's complement representation.
+            behavior: if (rd % RFS) X[rd % RFS] = (unsigned)X[rs1 % RFS] + (unsigned)X[rs2 % RFS];
         }
 
         SUB {
+            operands: unsigned<5> rd, unsigned<5> rs1, signed<5> rs2;
             encoding: 7'b0100000 :: rs2[4:0] :: rs1[4:0] :: 3'b000 :: rd[4:0] :: 7'b0110011;
             assembly:"{name(rd)}, {name(rs1)}, {name(rs2)}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = X[rs1 % RFS] - X[rs2 % RFS];
+            behavior: if (rd % RFS) X[rd % RFS] = (unsigned)X[rs1 % RFS] - (unsigned)X[rs2 % RFS];
         }
 
         SLL {
+            operands: unsigned<5> rd, unsigned<5> rs1, signed<5> rs2;
             encoding: 7'b0000000 :: rs2[4:0] :: rs1[4:0] :: 3'b001 :: rd[4:0] :: 7'b0110011;
             assembly:"{name(rd)}, {name(rs1)}, {name(rs2)}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = X[rs1 % RFS] << (X[rs2 % RFS] & (XLEN - 1));
+            behavior: if (rd % RFS) X[rd % RFS] = X[rs1 % RFS] << ((unsigned)X[rs2 % RFS] & (XLEN - 1));
         }
 
         SLT {
+            operands: unsigned<5> rd, unsigned<5> rs1, signed<5> rs2;
             encoding: 7'b0000000 :: rs2[4:0] :: rs1[4:0] :: 3'b010 :: rd[4:0] :: 7'b0110011;
             assembly:"{name(rd)}, {name(rs1)}, {name(rs2)}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = (signed)X[rs1 % RFS] < (signed)X[rs2 % RFS] ? 1 : 0;
+            behavior: if (rd % RFS) X[rd % RFS] = (signed)X[rs1 % RFS] < (signed)X[rs2 % RFS] ? 1 : 0;
         }
 
         SLTU {
+            operands: unsigned<5> rd, unsigned<5> rs1, signed<5> rs2;
             encoding: 7'b0000000 :: rs2[4:0] :: rs1[4:0] :: 3'b011 :: rd[4:0] :: 7'b0110011;
             assembly:"{name(rd)}, {name(rs1)}, {name(rs2)}";
-               behavior: if ((rd % RFS) != 0) X[rd % RFS] = X[rs1 % RFS] < X[rs2 % RFS] ? 1 : 0;
+               behavior: if (rd % RFS) X[rd % RFS] = (unsigned)X[rs1 % RFS] < (unsigned)X[rs2 % RFS] ? 1 : 0;
         }
 
         XOR {
+            operands: unsigned<5> rd, unsigned<5> rs1, signed<5> rs2;
             encoding: 7'b0000000 :: rs2[4:0] :: rs1[4:0] :: 3'b100 :: rd[4:0] :: 7'b0110011;
             assembly:"{name(rd)}, {name(rs1)}, {name(rs2)}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = X[rs1 % RFS] ^ X[rs2 % RFS];
+            behavior: if (rd % RFS) X[rd % RFS] = X[rs1 % RFS] ^ X[rs2 % RFS];
         }
 
         SRL {
+            operands: unsigned<5> rd, unsigned<5> rs1, signed<5> rs2;
             encoding: 7'b0000000 :: rs2[4:0] :: rs1[4:0] :: 3'b101 :: rd[4:0] :: 7'b0110011;
             assembly:"{name(rd)}, {name(rs1)}, {name(rs2)}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = X[rs1 % RFS] >> (X[rs2 % RFS] & (XLEN - 1));
+            behavior: if (rd % RFS) X[rd % RFS] = X[rs1 % RFS] >> ((unsigned)X[rs2 % RFS] & (XLEN - 1));
         }
 
         SRA {
+            operands: unsigned<5> rd, unsigned<5> rs1, signed<5> rs2;
             encoding: 7'b0100000 :: rs2[4:0] :: rs1[4:0] :: 3'b101 :: rd[4:0] :: 7'b0110011;
             assembly:"{name(rd)}, {name(rs1)}, {name(rs2)}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = (signed)X[rs1 % RFS] >> (X[rs2 % RFS] & (XLEN - 1));
+            behavior: if (rd % RFS) X[rd % RFS] = (signed)X[rs1 % RFS] >> ((unsigned)X[rs2 % RFS] & (XLEN - 1));
         }
 
         OR {
+            operands: unsigned<5> rd, unsigned<5> rs1, signed<5> rs2;
             encoding: 7'b0000000 :: rs2[4:0] :: rs1[4:0] :: 3'b110 :: rd[4:0] :: 7'b0110011;
             assembly:"{name(rd)}, {name(rs1)}, {name(rs2)}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = X[rs1 % RFS] | X[rs2 % RFS];
+            behavior: if (rd % RFS) X[rd % RFS] = X[rs1 % RFS] | X[rs2 % RFS];
         }
 
         AND {
+            operands: unsigned<5> rd, unsigned<5> rs1, signed<5> rs2;
             encoding: 7'b0000000 :: rs2[4:0] :: rs1[4:0] :: 3'b111 :: rd[4:0] :: 7'b0110011;
             assembly:"{name(rd)}, {name(rs1)}, {name(rs2)}";
-            behavior: if ((rd % RFS) != 0) X[rd % RFS] = X[rs1 % RFS] & X[rs2 % RFS];
+            behavior: if (rd % RFS) X[rd % RFS] = X[rs1 % RFS] & X[rs2 % RFS];
         }
 
         FENCE {
+            operands: bits<4> fm, bits<4> pred, bits<4> succ, unsigned<5> rd, unsigned<5> rs1;
             encoding: fm[3:0] :: pred[3:0] :: succ[3:0] :: rs1[4:0] :: 3'b000 :: rd[4:0] :: 7'b0001111;
             assembly:"{pred}, {succ} ({fm} , {name(rs1)}, {name(rd)})";
-            behavior: FENCE[fence] = pred << 4 | succ;
+            // This was broken before because pred << 4 always evaluates to 0.
+            // But all that bit manipulation can be replaced by a simple concatenation anyway.
+            behavior: FENCE[fence] = pred :: succ;
         }
 
         ECALL [[no_cont]] {
@@ -335,6 +395,7 @@ InstructionSet RV32I extends RISCVBase {
             encoding: 0b000000000001 :: 5'b00000 :: 3'b000 :: 5'b00000 :: 7'b1110011;
             behavior: raise(0, 3);
         }
+        
         MRET[[no_cont]] {
             encoding: 7'b0011000 :: 5'b00010 :: 5'b00000 :: 3'b000 :: 5'b00000 :: 7'b1110011;
             behavior: leave(3);
@@ -355,11 +416,12 @@ InstructionSet Zicsr extends RISCVBase {
 
     instructions {
         CSRRW {
+            operands: unsigned<12> csr, unsigned<5> rd, unsigned<5> rs1;
             encoding: csr[11:0] :: rs1[4:0] :: 3'b001 :: rd[4:0] :: 7'b1110011;
             assembly:"{name(rd)}, {csr}, {name(rs1)}";
             behavior: {
-                unsigned<XLEN> xrs1 = X[rs1 % RFS];
-                if ((rd % RFS) != 0) {
+                unsigned<XLEN> xrs1 = (unsigned)X[rs1 % RFS];
+                if (rd % RFS) {
                     unsigned<XLEN> xrd = CSR[csr];
                     CSR[csr] = xrs1;
                     // make sure Xrd is updated once CSR write succeeds
@@ -371,54 +433,59 @@ InstructionSet Zicsr extends RISCVBase {
         }
 
         CSRRS {
+            operands: unsigned<12> csr, unsigned<5> rd, unsigned<5> rs1;
             encoding: csr[11:0] :: rs1[4:0] :: 3'b010 :: rd[4:0] :: 7'b1110011;
             assembly:"{name(rd)}, {csr}, {name(rs1)}";
             behavior: {
                 unsigned<XLEN> xrd = CSR[csr];
-                unsigned<XLEN> xrs1 = X[rs1 % RFS];
+                unsigned<XLEN> xrs1 = (unsigned)X[rs1 % RFS];
                 if (rs1 != 0) CSR[csr] = xrd | xrs1;
-                if ((rd % RFS) != 0) X[rd % RFS] = xrd;
+                if (rd % RFS) X[rd % RFS] = xrd;
             }
         }
 
         CSRRC {
+            operands: unsigned<12> csr, unsigned<5> rd, unsigned<5> rs1;
             encoding: csr[11:0] :: rs1[4:0] :: 3'b011 :: rd[4:0] :: 7'b1110011;
             assembly:"{name(rd)}, {csr}, {name(rs1)}";
             behavior: {
                 unsigned<XLEN> xrd = CSR[csr];
-                unsigned<XLEN> xrs1 = X[rs1 % RFS];
+                unsigned<XLEN> xrs1 = (unsigned)X[rs1 % RFS];
                 if (rs1 != 0) CSR[csr] = xrd & ~xrs1;
-                if ((rd % RFS) != 0) X[rd % RFS] = xrd;
+                if (rd % RFS) X[rd % RFS] = xrd;
             }
         }
 
         CSRRWI {
+            operands: unsigned<12> csr, unsigned<5> rd, unsigned<5> zimm;
             encoding: csr[11:0] :: zimm[4:0] :: 3'b101 :: rd[4:0] :: 7'b1110011;
             assembly:"{name(rd)}, {csr}, {zimm:#0x}";
             behavior: {
                 unsigned<XLEN> xrd = CSR[csr];
                 CSR[csr] = (unsigned<XLEN>)zimm;
-                if ((rd % RFS) != 0) X[rd % RFS] = xrd;
+                if (rd % RFS) X[rd % RFS] = xrd;
             }
         }
 
         CSRRSI {
+            operands: unsigned<12> csr, unsigned<5> rd, unsigned<5> zimm;
             encoding: csr[11:0] :: zimm[4:0] :: 3'b110 :: rd[4:0] :: 7'b1110011;
             assembly:"{name(rd)}, {csr}, {zimm:#0x}";
             behavior: {
                 unsigned<XLEN> xrd = CSR[csr];
                 if (zimm != 0) CSR[csr] = xrd | (unsigned<XLEN>)zimm;
-                if ((rd % RFS) != 0) X[rd % RFS] = xrd;
+                if (rd % RFS) X[rd % RFS] = xrd;
             }
         }
 
         CSRRCI {
+            operands: unsigned<12> csr, unsigned<5> rd, unsigned<5> zimm;
             encoding: csr[11:0] :: zimm[4:0] :: 3'b111 :: rd[4:0] :: 7'b1110011;
             assembly:"{name(rd)}, {csr}, {zimm:#0x}";
             behavior: {
                 unsigned<XLEN> xrd = CSR[csr];
                 if (zimm != 0) CSR[csr] = xrd & ~((unsigned<XLEN>)zimm);
-                if ((rd % RFS) != 0) X[rd % RFS] = xrd;
+                if (rd % RFS) X[rd % RFS] = xrd;
             }
         }
     }
@@ -427,6 +494,7 @@ InstructionSet Zicsr extends RISCVBase {
 InstructionSet Zifencei extends RISCVBase {
     instructions {
         FENCE_I [[flush]] {
+            operands: unsigned<12> imm, unsigned<5> rd, unsigned<5> rs1;
             encoding: imm[11:0] :: rs1[4:0] :: 3'b001 :: rd[4:0] :: 7'b0001111 ;
             assembly:"{name(rs1)}, {name(rd)}, {imm}";
             behavior: FENCE[fencei] = imm;
@@ -436,7 +504,7 @@ InstructionSet Zifencei extends RISCVBase {
 
 InstructionSet RVNMode extends RISCVBase {
     instructions {
-        URET[[no_cont]] {
+        URET [[no_cont]] {
             encoding: 7'b0000000 :: 5'b00010 :: 5'b00000 :: 3'b000 :: 5'b00000 :: 7'b1110011;
             behavior: leave(0);
         }
@@ -445,7 +513,7 @@ InstructionSet RVNMode extends RISCVBase {
 
 InstructionSet RVSMode extends RISCVBase {
     instructions {
-        SRET[[no_cont]]  {
+        SRET [[no_cont]]  {
             encoding: 7'b0001000 :: 5'b00010 :: 5'b00000 :: 3'b000 :: 5'b00000 :: 7'b1110011;
             behavior: leave(1);
         }
